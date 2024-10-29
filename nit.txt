@@ -1,0 +1,114 @@
+import os
+import cv2
+import cvzone
+from cvzone.PoseModule import PoseDetector
+
+# Initialize webcam capture and pose detector
+cap = cv2.VideoCapture(0)
+
+# Set the webcam to 16:9 aspect ratio
+frame_width = 1280
+frame_height = 720
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)
+
+detector = PoseDetector()
+
+# Shirt folder path
+shirtFolderPath = r"C:\Users\Admin\Downloads\Resources-1 - Copy\Resources\Shirts\MaleShirts"
+
+# Constants
+fixedRatio = 350 / 270  # widthOfShirt / widthOfPoint11to12
+shirtRatioHeightWidth = 670 / 380
+imageNumber = 0
+imgButtonRight = cv2.imread(r"C:\Users\Admin\Downloads\Resources-1 - Copy\Resources\button.png", cv2.IMREAD_UNCHANGED)
+imgButtonLeft = cv2.flip(imgButtonRight, 1)
+counterRight = 0
+counterLeft = 0
+selectionSpeed = 10
+
+# Mobile number to display
+mobile_number = "7893225234"  # Change this to your desired mobile number
+
+while True:
+    success, img = cap.read()
+    if not success:
+        break  # Webcam capture failed
+
+    # Read list of available shirts
+    listShirts = os.listdir(shirtFolderPath)
+    if not listShirts:
+        raise Exception(f"No shirt images found in {shirtFolderPath}")
+
+    img = detector.findPose(img, draw=False)
+    lmList, bboxInfo = detector.findPosition(img, bboxWithHands=False, draw=False)
+
+    if lmList and len(lmList) > 24:  # Check that required landmarks are detected
+        lm11 = lmList[11][0:2]  # Left shoulder
+        lm12 = lmList[12][0:2]  # Right shoulder
+
+        # Calculate shirt width based on shoulder distance
+        shoulder_width = lm11[0] - lm12[0]
+        widthOfShirt = int(shoulder_width * fixedRatio)
+
+        if widthOfShirt > 0:
+            imgShirtPath = os.path.join(shirtFolderPath, listShirts[imageNumber])
+            imgShirt = cv2.imread(imgShirtPath, cv2.IMREAD_UNCHANGED)
+            imgShirt = cv2.resize(imgShirt, (widthOfShirt, int(widthOfShirt * shirtRatioHeightWidth)))
+
+            # Dynamic offset based on shoulder distance
+            offset_x = int(0.15 * shoulder_width)  # Adjusts horizontally
+            offset_y = int(0.25 * shoulder_width)  # Adjusts vertically
+
+            if lmList[23][0] > lmList[24][0]:  # Check orientation
+                imgShirt = cv2.flip(imgShirt, 1)
+
+            try:
+                # Overlay shirt image with calculated offsets
+                img = cvzone.overlayPNG(img, imgShirt, (lm12[0] - offset_x, lm12[1] - offset_y))
+            except Exception as e:
+                print(f"Error overlaying shirt: {e}")
+
+        # Overlay control buttons for navigating shirt options
+        img = cvzone.overlayPNG(img, imgButtonRight, (1074, 293))
+        img = cvzone.overlayPNG(img, imgButtonLeft, (72, 293))
+
+        # Gesture controls to change shirts
+        if lmList[16][0] < 300:  # Right hand gesture to go to the next shirt
+            counterRight += 1
+            cv2.ellipse(img, (139, 360), (66, 66), 0, 0, counterRight * selectionSpeed, (0, 255, 0), 20)
+            if counterRight * selectionSpeed > 360:
+                counterRight = 0
+                if imageNumber < len(listShirts) - 1:
+                    imageNumber += 1
+        elif lmList[15][0] > 900:  # Left hand gesture to go to the previous shirt
+            counterLeft += 1
+            cv2.ellipse(img, (1138, 360), (66, 66), 0, 0, counterLeft * selectionSpeed, (0, 255, 0), 20)
+            if counterLeft * selectionSpeed > 360:
+                counterLeft = 0
+                if imageNumber > 0:
+                    imageNumber -= 1
+        else:
+            counterRight = 0
+            counterLeft = 0
+
+        # Detect thumb up gesture for order confirmation
+        thumb_up_threshold = 50  # Adjust as needed for the thumb position
+        thumb_tip = lmList[4]  # Tip of the right thumb
+
+        # Check if the thumb is raised (only using thumb position)
+        if thumb_tip[1] < (lmList[5][1] + thumb_up_threshold):  # Comparing with the base of the thumb
+            # Display confirmation
+            confirm_text = "Order Confirmed!"
+            cv2.putText(img, confirm_text, (500, 300), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+            # Display mobile number on webcam
+            mobile_text = "COE lab, 4th row, 2 place"
+            cv2.putText(img, mobile_text, (30, 35), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 4)
+
+    cv2.imshow("Virtual Shirt Try-On", img)
+    if cv2.waitKey(1) & 0xFF == 27:  # Exit if Escape key is pressed
+        break
+
+cap.release()
+cv2.destroyAllWindows()
